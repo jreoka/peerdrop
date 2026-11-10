@@ -55,4 +55,15 @@ pub enum Commands {
         #[arg(short = 'y', long = "yes")]
         yes: bool,
     },
+
+    /// Run a transit relay server to facilitate Internet file transfers
+    Relay {
+        /// Port to bind the relay server to
+        #[arg(short, long, default_value = "4001")]
+        port: u16,
+
+        /// IP address or interface to bind to
+        #[arg(short, long, default_value = "0.0.0.0")]
+        bind: String,
+    },
 }

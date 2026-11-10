@@ -3,6 +3,7 @@ mod cli;
 mod crypto;
 mod network;
 mod protocol;
+mod relay;
 mod transfer;
 mod words;
 
@@ -46,6 +47,9 @@ async fn main() -> ExitCode {
         Some(Commands::Receive { code, out, yes }) => {
             transfer::run_receiver(&code, out, yes || cli.yes, cli.relay.as_deref()).await
         }
+        Some(Commands::Relay { port, bind }) => {
+            relay::run_relay(&bind, port).await
+        }
         None => {
             if let Some(target) = cli.target {
                 let target_path = PathBuf::from(&target);
@@ -71,7 +75,8 @@ async fn main() -> ExitCode {
                 eprintln!();
                 eprintln!("Usage:");
                 eprintln!("  peerdrop send <file_or_dir>        Send a file or directory");
-                eprintln!("  peerdrop receive <code>            Receive using a croc-like code");
+                eprintln!("  peerdrop receive <code>            Receive using transfer code");
+                eprintln!("  peerdrop relay                     Run a transit relay server");
                 eprintln!();
                 eprintln!("Quick Shortcuts:");
                 eprintln!("  peerdrop <file_or_dir>             Automatically sends the file/dir");
