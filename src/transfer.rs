@@ -1,6 +1,8 @@
 use crate::archive::{prepare_payload, unpack_payload};
 use crate::crypto::{hex_encode, SessionKeys};
-use crate::network::{create_p2p_node, protocol_for_room, Ticket};
+use crate::network::{
+    connect_relay, create_p2p_node, get_relay_address, protocol_for_room, StreamConnection, Ticket,
+};
 use crate::protocol::{
     read_encrypted_frame, recv_json_msg, send_json_msg, write_encrypted_frame,
     AuthChallengeMsg, AuthFinalMsg, AuthResponseMsg, ReceiverDecision, TransferAck,
@@ -33,6 +35,7 @@ fn format_bytes(bytes: u64) -> String {
 pub async fn run_sender(
     source_path: &Path,
     custom_code: Option<String>,
+    relay_override: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 1. Prepare and hash payload
     println!("{}", style("Scanning and preparing payload...").dim());
@@ -85,22 +88,7 @@ pub async fn run_sender(
         }
     });
 
-    let (listen_port, listen_addr) = port_rx.await?;
-
-    // Build multiaddresses for direct connection
-    let mut direct_addrs = Vec::new();
-    for ip in &node.local_ips {
-        direct_addrs.push(format!("/ip4/{}/tcp/{}", ip, listen_port));
-    }
-    if direct_addrs.is_empty() {
-        direct_addrs.push(listen_addr.to_string());
-    }
-
-    let ticket = Ticket {
-        c: code.clone(),
-        a: direct_addrs.clone(),
-    };
-    let ticket_str = ticket.to_base58().unwrap_or_default();
+    let _ = port_rx.await;
 
     // 5. Print sleek croc-style sender interface
     println!();
@@ -119,31 +107,57 @@ pub async fn run_sender(
     println!();
     println!("  {:<12} {}", style("Code:").bold(), style(&code).magenta().bold());
     println!();
-    println!("  {}", style("► To receive on another machine on the same network, run:").bold());
+    println!("  {}", style("► To receive, run:").bold());
     println!("    {}", style(format!("peerdrop {}", code)).bold().cyan());
-    println!();
-    println!("  {}", style("► If transferring across different networks (Internet/WAN):").dim());
-    if let Some(first_addr) = direct_addrs.first() {
-        let clean_endpoint = first_addr.strip_prefix("/ip4/").unwrap_or(first_addr).replace("/tcp/", ":");
-        println!("    peerdrop {}@{}", code, clean_endpoint);
-    }
-    println!("    (or: peerdrop {})", ticket_str);
     println!();
     println!("{}", style("Waiting for recipient to connect...").dim());
 
-    // 6. Wait for recipient to connect; loop to handle connection attempts resiliently
-    while let Some((peer_id, raw_stream)) = incoming_streams.next().await {
-        let mut stream = raw_stream.compat();
+    let (stream_tx, mut stream_rx) = mpsc::channel::<(String, StreamConnection)>(8);
 
+    // Forward LAN / mDNS incoming streams
+    let tx_lan = stream_tx.clone();
+    let lan_task = tokio::spawn(async move {
+        while let Some((peer_id, raw_stream)) = incoming_streams.next().await {
+            let conn = StreamConnection::P2p(raw_stream.compat());
+            if tx_lan.send((format!("LAN peer {}", peer_id), conn)).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // Forward Internet relay incoming stream
+    let tx_relay = stream_tx.clone();
+    let relay_addr = get_relay_address(relay_override);
+    let relay_token = keys.transit_token();
+    let relay_task = tokio::spawn(async move {
+        loop {
+            match connect_relay(&relay_addr, &relay_token).await {
+                Ok(tcp_stream) => {
+                    let conn = StreamConnection::Tcp(tcp_stream);
+                    if tx_relay.send(("Internet relay".to_string(), conn)).await.is_err() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_secs(3600)).await;
+                    break;
+                }
+                Err(_) => {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            }
+        }
+    });
+
+    // 6. Wait for recipient to connect; loop to handle connection attempts resiliently
+    while let Some((source, mut stream)) = stream_rx.recv().await {
         println!();
-        println!("{} Connected to peer {}", style("✔").green().bold(), style(peer_id.to_string()).cyan());
+        println!("{} Connected to peer via {}", style("✔").green().bold(), style(&source).cyan());
         println!("{}", style("Performing zero-knowledge cryptographic handshake...").dim());
 
         // Handshake: read challenge from receiver (direction 1, frame 0)
         let auth_challenge: AuthChallengeMsg = match recv_json_msg(&mut stream, &keys, 0, 1).await {
             Ok(msg) => msg,
             Err(e) => {
-                println!("{} Handshake failed for peer {}: {}", style("!").yellow(), peer_id, e);
+                println!("{} Handshake failed for {}: {}", style("!").yellow(), source, e);
                 println!("{}", style("Waiting for recipient to connect...").dim());
                 continue;
             }
@@ -153,7 +167,7 @@ pub async fn run_sender(
             println!(
                 "{} Rejected peer {}: incompatible protocol version {}",
                 style("!").yellow(),
-                peer_id,
+                source,
                 auth_challenge.version
             );
             println!("{}", style("Waiting for recipient to connect...").dim());
@@ -171,7 +185,7 @@ pub async fn run_sender(
 
         // Send response and our challenge (direction 0, frame 0)
         if let Err(e) = send_json_msg(&mut stream, &keys, 0, 0, &resp_msg).await {
-            println!("{} Failed sending auth response to {}: {}", style("!").yellow(), peer_id, e);
+            println!("{} Failed sending auth response to {}: {}", style("!").yellow(), source, e);
             println!("{}", style("Waiting for recipient to connect...").dim());
             continue;
         }
@@ -180,7 +194,7 @@ pub async fn run_sender(
         let auth_final: AuthFinalMsg = match recv_json_msg(&mut stream, &keys, 1, 1).await {
             Ok(msg) => msg,
             Err(e) => {
-                println!("{} Handshake failed for peer {}: {}", style("!").yellow(), peer_id, e);
+                println!("{} Handshake failed for {}: {}", style("!").yellow(), source, e);
                 println!("{}", style("Waiting for recipient to connect...").dim());
                 continue;
             }
@@ -190,7 +204,7 @@ pub async fn run_sender(
             println!(
                 "{} Peer authentication failed for {}: transfer code mismatch!",
                 style("✖").red().bold(),
-                peer_id
+                source
             );
             println!("{}", style("Waiting for recipient to connect...").dim());
             continue;
@@ -208,6 +222,8 @@ pub async fn run_sender(
             let reason = decision.reason.unwrap_or_else(|| "Declined by recipient".into());
             println!("{} Transfer aborted: {}", style("✖").red().bold(), reason);
             swarm_handle.abort();
+            lan_task.abort();
+            relay_task.abort();
             return Ok(());
         }
 
@@ -268,6 +284,8 @@ pub async fn run_sender(
         }
 
         swarm_handle.abort();
+        lan_task.abort();
+        relay_task.abort();
         return Ok(());
     }
 
@@ -279,6 +297,7 @@ pub async fn run_receiver(
     code_or_ticket: &str,
     target_dir: Option<PathBuf>,
     auto_accept: bool,
+    relay_override: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let dest_dir = target_dir.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
@@ -314,12 +333,12 @@ pub async fn run_receiver(
 
     let is_direct = !direct_addresses.is_empty();
     if is_direct {
-        println!("  {}", style("► Connecting directly to peer addresses...").dim());
+        println!("  {}", style("► Connecting directly to peer address...").dim());
         for addr in &direct_addresses {
             let _ = node.swarm.dial(addr.clone());
         }
     } else {
-        println!("  {}", style("► Searching for sender on local network via mDNS...").dim());
+        println!("  {}", style("► Connecting to peer (LAN & Internet)...").dim());
     }
 
     let direct_addrs_clone = direct_addresses.clone();
@@ -354,21 +373,23 @@ pub async fn run_receiver(
         }
     });
 
-    // 3. Connect stream to sender
-    println!("{}", style("Waiting for peer connection...").dim());
-    let mut active_stream = None;
+    let (stream_tx, mut stream_rx) = mpsc::channel::<(String, StreamConnection)>(8);
 
-    let timeout_duration = Duration::from_secs(120);
-    let start_time = std::time::Instant::now();
-
-    while start_time.elapsed() < timeout_duration {
-        tokio::select! {
-            Some(peer_id) = peer_connected_rx.recv() => {
-                // Retry open_stream to account for stream negotiation latency
+    // Forward LAN / mDNS incoming streams
+    let tx_lan = stream_tx.clone();
+    let stream_control = node.stream_control.clone();
+    let protocol_clone = protocol.clone();
+    let lan_task = tokio::spawn(async move {
+        while let Some(peer_id) = peer_connected_rx.recv().await {
+            let tx = tx_lan.clone();
+            let mut ctrl = stream_control.clone();
+            let prot = protocol_clone.clone();
+            tokio::spawn(async move {
                 for attempt in 0..3 {
-                    match node.stream_control.open_stream(peer_id, protocol.clone()).await {
+                    match ctrl.open_stream(peer_id, prot.clone()).await {
                         Ok(st) => {
-                            active_stream = Some((peer_id, st));
+                            let conn = StreamConnection::P2p(st.compat());
+                            let _ = tx.send((format!("LAN peer {}", peer_id), conn)).await;
                             break;
                         }
                         Err(_) => {
@@ -378,24 +399,57 @@ pub async fn run_receiver(
                         }
                     }
                 }
-                if active_stream.is_some() {
+            });
+        }
+    });
+
+    // Forward Internet relay incoming stream
+    let tx_relay = stream_tx.clone();
+    let relay_addr = get_relay_address(relay_override);
+    let relay_token = keys.transit_token();
+    let relay_task = tokio::spawn(async move {
+        loop {
+            match connect_relay(&relay_addr, &relay_token).await {
+                Ok(tcp_stream) => {
+                    let conn = StreamConnection::Tcp(tcp_stream);
+                    let _ = tx_relay.send(("Internet relay".to_string(), conn)).await;
                     break;
                 }
+                Err(_) => {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            }
+        }
+    });
+
+    // 3. Connect stream to sender
+    println!("{}", style("Waiting for peer connection...").dim());
+
+    let timeout_duration = Duration::from_secs(120);
+    let start_time = std::time::Instant::now();
+    let mut connection_opt = None;
+
+    while start_time.elapsed() < timeout_duration {
+        tokio::select! {
+            Some((source, stream)) = stream_rx.recv() => {
+                connection_opt = Some((source, stream));
+                break;
             }
             _ = tokio::time::sleep(Duration::from_millis(200)) => {}
         }
     }
 
-    let (peer_id, raw_stream) = match active_stream {
+    let (source, mut stream) = match connection_opt {
         Some(s) => s,
         None => {
             swarm_handle.abort();
-            return Err("Timed out waiting for peer connection. Make sure both machines are on the same network or use direct ticket.".into());
+            lan_task.abort();
+            relay_task.abort();
+            return Err("Timed out waiting for peer connection. Ensure the transfer code matches and the sender is running.".into());
         }
     };
-    let mut stream = raw_stream.compat();
 
-    println!("{} Connected to peer {}", style("✔").green().bold(), style(peer_id.to_string()).cyan());
+    println!("{} Connected to peer via {}", style("✔").green().bold(), style(&source).cyan());
     println!("{}", style("Performing zero-knowledge cryptographic handshake...").dim());
 
     // 4. Handshake: Receiver sends challenge (direction 1, frame 0)
@@ -461,6 +515,8 @@ pub async fn run_receiver(
         send_json_msg(&mut stream, &keys, 2, 1, &decision).await?;
         println!("{}", style("Transfer declined.").yellow());
         swarm_handle.abort();
+        lan_task.abort();
+        relay_task.abort();
         return Ok(());
     }
 
@@ -555,5 +611,7 @@ pub async fn run_receiver(
     }
 
     swarm_handle.abort();
+    lan_task.abort();
+    relay_task.abort();
     Ok(())
 }

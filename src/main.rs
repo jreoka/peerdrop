@@ -40,15 +40,17 @@ async fn main() -> ExitCode {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Some(Commands::Send { path, code }) => transfer::run_sender(&path, code).await,
+        Some(Commands::Send { path, code }) => {
+            transfer::run_sender(&path, code, cli.relay.as_deref()).await
+        }
         Some(Commands::Receive { code, out, yes }) => {
-            transfer::run_receiver(&code, out, yes || cli.yes).await
+            transfer::run_receiver(&code, out, yes || cli.yes, cli.relay.as_deref()).await
         }
         None => {
             if let Some(target) = cli.target {
                 let target_path = PathBuf::from(&target);
                 if target_path.exists() {
-                    transfer::run_sender(&target_path, cli.custom_code).await
+                    transfer::run_sender(&target_path, cli.custom_code, cli.relay.as_deref()).await
                 } else if cli.custom_code.is_some() || looks_like_file_path(&target) {
                     eprintln!(
                         "{} Path '{}' does not exist.",
@@ -57,7 +59,7 @@ async fn main() -> ExitCode {
                     );
                     return ExitCode::from(1);
                 } else {
-                    transfer::run_receiver(&target, None, cli.yes).await
+                    transfer::run_receiver(&target, None, cli.yes, cli.relay.as_deref()).await
                 }
             } else {
                 eprintln!(

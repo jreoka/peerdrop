@@ -56,6 +56,14 @@ impl SessionKeys {
         })
     }
 
+    /// Derives a 32-byte hex token for Internet relay pairing
+    pub fn transit_token(&self) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(b"peerdrop-transit-relay-token:");
+        hasher.update(&self.auth_key);
+        hex_encode(&hasher.finalize())
+    }
+
     /// Generates an HMAC-SHA256 response for a challenge
     pub fn compute_auth_response(&self, challenge: &[u8; 32]) -> [u8; 32] {
         let mut mac = HmacSha256::new_from_slice(&self.auth_key)
@@ -179,5 +187,13 @@ mod tests {
     #[test]
     fn test_hex_encode() {
         assert_eq!(hex_encode(&[0x00, 0x0f, 0x10, 0xff]), "000f10ff");
+    }
+
+    #[test]
+    fn test_transit_token_deterministic() {
+        let k1 = SessionKeys::from_code("1234-cosmic-falcon").unwrap();
+        let k2 = SessionKeys::from_code("1234-cosmic-falcon").unwrap();
+        assert_eq!(k1.transit_token(), k2.transit_token());
+        assert_eq!(k1.transit_token().len(), 64);
     }
 }

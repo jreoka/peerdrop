@@ -3,8 +3,104 @@ use libp2p::swarm::NetworkBehaviour;
 use libp2p::{identify, mdns, noise, tcp, yamux, StreamProtocol, Swarm, SwarmBuilder};
 use libp2p_stream as stream;
 use serde::{Deserialize, Serialize};
+use std::io;
 use std::net::IpAddr;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
+
+pub const DEFAULT_RELAY: &str = "transit.magic-wormhole.io:4001";
+
+pub fn get_relay_address(custom: Option<&str>) -> String {
+    let raw = if let Some(r) = custom && !r.trim().is_empty() {
+        r.trim().to_string()
+    } else if let Ok(env_r) = std::env::var("PEERDROP_RELAY") && !env_r.trim().is_empty() {
+        env_r.trim().to_string()
+    } else {
+        DEFAULT_RELAY.to_string()
+    };
+
+    if !raw.contains(':') {
+        format!("{}:4001", raw)
+    } else {
+        raw
+    }
+}
+
+pub enum StreamConnection {
+    P2p(tokio_util::compat::Compat<libp2p::Stream>),
+    Tcp(tokio::net::TcpStream),
+}
+
+impl AsyncRead for StreamConnection {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            StreamConnection::P2p(s) => Pin::new(s).poll_read(cx, buf),
+            StreamConnection::Tcp(s) => Pin::new(s).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for StreamConnection {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        match self.get_mut() {
+            StreamConnection::P2p(s) => Pin::new(s).poll_write(cx, buf),
+            StreamConnection::Tcp(s) => Pin::new(s).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            StreamConnection::P2p(s) => Pin::new(s).poll_flush(cx),
+            StreamConnection::Tcp(s) => Pin::new(s).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            StreamConnection::P2p(s) => Pin::new(s).poll_shutdown(cx),
+            StreamConnection::Tcp(s) => Pin::new(s).poll_shutdown(cx),
+        }
+    }
+}
+
+pub async fn connect_relay(relay_addr: &str, token: &str) -> io::Result<tokio::net::TcpStream> {
+    let mut stream = tokio::net::TcpStream::connect(relay_addr).await?;
+    let cmd = format!("please relay {}\n", token);
+    stream.write_all(cmd.as_bytes()).await?;
+
+    let mut line_buf = Vec::new();
+    let mut byte = [0u8; 1];
+    while line_buf.len() < 64 {
+        let n = stream.read(&mut byte).await?;
+        if n == 0 {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Relay closed connection"));
+        }
+        if byte[0] == b'\n' {
+            break;
+        }
+        line_buf.push(byte[0]);
+    }
+
+    let line = String::from_utf8_lossy(&line_buf);
+    if line.trim() == "ok" {
+        Ok(stream)
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::ConnectionRefused,
+            format!("Relay error: {}", line.trim()),
+        ))
+    }
+}
 
 #[derive(NetworkBehaviour)]
 pub struct AppBehaviour {
@@ -20,6 +116,7 @@ pub struct Ticket {
 }
 
 impl Ticket {
+    #[allow(dead_code)]
     pub fn to_base58(&self) -> Result<String, String> {
         let json = serde_json::to_vec(self).map_err(|e| e.to_string())?;
         Ok(format!("pd1_{}", bs58::encode(json).into_string()))
@@ -76,6 +173,7 @@ impl Ticket {
 pub struct P2pNode {
     pub swarm: Swarm<AppBehaviour>,
     pub stream_control: stream::Control,
+    #[allow(dead_code)]
     pub local_ips: Vec<IpAddr>,
 }
 
@@ -187,5 +285,28 @@ mod tests {
         assert!(Ticket::from_str("   ").is_err());
         assert!(Ticket::from_str("@192.168.1.1:8080").is_err());
         assert!(Ticket::from_str("code@invalid_addr").is_err());
+    }
+
+    #[tokio::test]
+    async fn test_relay_live_internet_bridge() {
+        let token = "a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890";
+        let relay_addr = DEFAULT_RELAY;
+
+        let t1 = tokio::spawn(async move {
+            connect_relay(relay_addr, token).await
+        });
+        let t2 = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            connect_relay(relay_addr, token).await
+        });
+
+        let (r1, r2) = tokio::join!(t1, t2);
+        let mut s1 = r1.unwrap().expect("sender should bridge via relay");
+        let mut s2 = r2.unwrap().expect("receiver should bridge via relay");
+
+        s1.write_all(b"INTERNET_RELAY_OK").await.unwrap();
+        let mut buf = [0u8; 17];
+        s2.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"INTERNET_RELAY_OK");
     }
 }

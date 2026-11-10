@@ -24,6 +24,10 @@ pub struct Cli {
     /// Automatically accept incoming transfer without prompting
     #[arg(short = 'y', long = "yes", global = true)]
     pub yes: bool,
+
+    /// Optional custom relay server (host:port) for Internet transfers
+    #[arg(long, global = true)]
+    pub relay: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
