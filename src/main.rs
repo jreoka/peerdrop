@@ -68,7 +68,7 @@ async fn main() -> ExitCode {
             } else {
                 eprintln!(
                     "{}",
-                    style("PeerDrop: Completely Peer-to-Peer Encrypted Transfer")
+                    style("PeerDrop: Encrypted File Transfer")
                         .cyan()
                         .bold()
                 );
