@@ -3,11 +3,11 @@ use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "peerdrop",
+    name = "voidhop",
     author = "Antigravity Team",
     version = "0.1.0",
     about = "Completely peer-to-peer serverless cross-platform encrypted file & directory transfer tool",
-    long_about = "PeerDrop is a serverless, end-to-end encrypted CLI file and directory transfer tool.\nIt uses libp2p for P2P transport, mDNS for local discovery, ChaCha20-Poly1305 encryption, and SHA-256 integrity verification."
+    long_about = "VoidHop is a serverless, end-to-end encrypted CLI file and directory transfer tool.\nIt uses libp2p for P2P transport, mDNS for local discovery, ChaCha20-Poly1305 encryption, and SHA-256 integrity verification."
 )]
 pub struct Cli {
     #[command(subcommand)]

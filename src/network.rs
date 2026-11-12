@@ -15,7 +15,7 @@ pub const DEFAULT_RELAY: &str = "transit.magic-wormhole.io:4001";
 pub fn get_relay_address(custom: Option<&str>) -> String {
     let raw = if let Some(r) = custom && !r.trim().is_empty() {
         r.trim().to_string()
-    } else if let Ok(env_r) = std::env::var("PEERDROP_RELAY") && !env_r.trim().is_empty() {
+    } else if let Ok(env_r) = std::env::var("VOIDHOP_RELAY") && !env_r.trim().is_empty() {
         env_r.trim().to_string()
     } else {
         DEFAULT_RELAY.to_string()
@@ -119,7 +119,7 @@ impl Ticket {
     #[allow(dead_code)]
     pub fn to_base58(&self) -> Result<String, String> {
         let json = serde_json::to_vec(self).map_err(|e| e.to_string())?;
-        Ok(format!("pd1_{}", bs58::encode(json).into_string()))
+        Ok(format!("vh1_{}", bs58::encode(json).into_string()))
     }
 
     pub fn from_str(s: &str) -> Result<Self, String> {
@@ -128,7 +128,7 @@ impl Ticket {
             return Err("Code or ticket cannot be empty".into());
         }
 
-        if let Some(payload) = trimmed.strip_prefix("pd1_") {
+        if let Some(payload) = trimmed.strip_prefix("vh1_") {
             let bytes = bs58::decode(payload)
                 .into_vec()
                 .map_err(|e| format!("Invalid base58 ticket: {}", e))?;
@@ -192,7 +192,7 @@ pub fn create_p2p_node() -> Result<P2pNode, Box<dyn std::error::Error>> {
             )?;
             let stream = stream::Behaviour::new();
             let identify = identify::Behaviour::new(identify::Config::new(
-                "/peerdrop/1.0.0".into(),
+                "/voidhop/1.0.0".into(),
                 key.public(),
             ));
             Ok(AppBehaviour {
@@ -229,7 +229,7 @@ pub fn create_p2p_node() -> Result<P2pNode, Box<dyn std::error::Error>> {
 }
 
 pub fn protocol_for_room(room_id: &str) -> StreamProtocol {
-    StreamProtocol::try_from_owned(format!("/peerdrop/xfer/{}", room_id))
+    StreamProtocol::try_from_owned(format!("/voidhop/xfer/{}", room_id))
         .expect("valid protocol name")
 }
 
@@ -244,7 +244,7 @@ mod tests {
             a: vec!["/ip4/192.168.1.10/tcp/50000".to_string()],
         };
         let b58 = ticket.to_base58().unwrap();
-        assert!(b58.starts_with("pd1_"));
+        assert!(b58.starts_with("vh1_"));
 
         let parsed = Ticket::from_str(&b58).unwrap();
         assert_eq!(parsed.c, ticket.c);

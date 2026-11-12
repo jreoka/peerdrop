@@ -38,14 +38,14 @@ pub async fn run_relay(bind: &str, port: u16) -> Result<(), Box<dyn std::error::
 
     println!();
     println!("{}", style("╭────────────────────────────────────────────────────────────────╮").cyan());
-    println!("{}", style("│   PEERDROP ⇄ Encrypted Transit Relay Server                    │").cyan().bold());
+    println!("{}", style("│   VOIDHOP ⇄ Encrypted Transit Relay Server                     │").cyan().bold());
     println!("{}", style("╰────────────────────────────────────────────────────────────────╯").cyan());
     println!();
     println!("  {:<15} {}", style("Listening on:").bold(), style(local_addr.to_string()).yellow().bold());
     println!("  {:<15} {}", style("Status:").bold(), style("Ready to bridge peer connections").green());
     println!();
-    println!("  {:<15} {}", style("Usage:").bold(), style(format!("peerdrop <file> --relay {}", local_addr)).cyan());
-    println!("  {:<15} {}", style("Env Var:").bold(), style(format!("PEERDROP_RELAY={}", local_addr)).dim());
+    println!("  {:<15} {}", style("Usage:").bold(), style(format!("voidhop <file> --relay {}", local_addr)).cyan());
+    println!("  {:<15} {}", style("Env Var:").bold(), style(format!("VOIDHOP_RELAY={}", local_addr)).dim());
     println!();
     println!("{}", style("Waiting for peer connections...").dim());
 

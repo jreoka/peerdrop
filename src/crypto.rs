@@ -31,19 +31,19 @@ impl SessionKeys {
 
         // 1. Derive room ID for libp2p protocol negotiation (truncated hex of SHA-256)
         let mut room_hasher = Sha256::new();
-        room_hasher.update(b"peerdrop-room:");
+        room_hasher.update(b"voidhop-room:");
         room_hasher.update(code_bytes);
         let room_hash = hex_encode(&room_hasher.finalize()[..10]);
 
         // 2. Derive cryptographic keys via HKDF-SHA256
-        let hk = Hkdf::<Sha256>::new(Some(b"peerdrop-protocol-v1-salt"), code_bytes);
+        let hk = Hkdf::<Sha256>::new(Some(b"voidhop-protocol-v1-salt"), code_bytes);
 
         let mut cipher_key_bytes = [0u8; 32];
-        hk.expand(b"peerdrop-cipher-key", &mut cipher_key_bytes)
+        hk.expand(b"voidhop-cipher-key", &mut cipher_key_bytes)
             .expect("32 bytes for cipher key is within HKDF limits");
 
         let mut auth_key = [0u8; 32];
-        hk.expand(b"peerdrop-auth-key", &mut auth_key)
+        hk.expand(b"voidhop-auth-key", &mut auth_key)
             .expect("32 bytes for auth key is within HKDF limits");
 
         let cipher_key = Key::from(cipher_key_bytes);
@@ -59,7 +59,7 @@ impl SessionKeys {
     /// Derives a 32-byte hex token for Internet relay pairing
     pub fn transit_token(&self) -> String {
         let mut hasher = Sha256::new();
-        hasher.update(b"peerdrop-transit-relay-token:");
+        hasher.update(b"voidhop-transit-relay-token:");
         hasher.update(&self.auth_key);
         hex_encode(&hasher.finalize())
     }
@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn test_encrypt_decrypt_roundtrip() {
         let keys = SessionKeys::from_code("test-code").unwrap();
-        let data = b"Hello, PeerDrop encrypted world!";
+        let data = b"Hello, VoidHop encrypted world!";
         let ciphertext = keys.encrypt_chunk(0, 0, data).unwrap();
         assert_ne!(&ciphertext[..], data);
 

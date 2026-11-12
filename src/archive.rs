@@ -321,12 +321,13 @@ mod tests {
     fn test_prepare_payload_single_file() {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("sample.txt");
-        fs::write(&file_path, b"Hello PeerDrop test").unwrap();
+        let content = b"Hello VoidHop test";
+        fs::write(&file_path, content).unwrap();
 
         let payload = prepare_payload(&file_path).unwrap();
         assert_eq!(payload.meta.name, "sample.txt");
         assert!(!payload.meta.is_directory);
-        assert_eq!(payload.meta.total_bytes, 19);
+        assert_eq!(payload.meta.total_bytes, content.len() as u64);
         assert_eq!(payload.meta.file_count, 1);
         assert!(!payload.meta.sha256.is_empty());
     }

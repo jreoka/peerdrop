@@ -93,7 +93,7 @@ pub async fn run_sender(
     // 5. Print sleek croc-style sender interface
     println!();
     println!("{}", style("╭────────────────────────────────────────────────────────────────╮").cyan());
-    println!("{}", style("│   PEERDROP ⇄ Encrypted Peer-to-Peer File Transfer              │").cyan().bold());
+    println!("{}", style("│   VOIDHOP ⇄ Encrypted Peer-to-Peer File Transfer               │").cyan().bold());
     println!("{}", style("╰────────────────────────────────────────────────────────────────╯").cyan());
     println!();
     let kind = if payload.meta.is_directory {
@@ -108,7 +108,7 @@ pub async fn run_sender(
     println!("  {:<12} {}", style("Code:").bold(), style(&code).magenta().bold());
     println!();
     println!("  {}", style("► To receive, run:").bold());
-    println!("    {}", style(format!("peerdrop {}", code)).bold().cyan());
+    println!("    {}", style(format!("voidhop {}", code)).bold().cyan());
     println!();
     println!("{}", style("Waiting for recipient to connect...").dim());
 
@@ -312,7 +312,7 @@ pub async fn run_receiver(
 
     println!();
     println!("{}", style("╭────────────────────────────────────────────────────────────────╮").cyan());
-    println!("{}", style("│   PEERDROP ⇄ Encrypted Peer-to-Peer File Transfer              │").cyan().bold());
+    println!("{}", style("│   VOIDHOP ⇄ Encrypted Peer-to-Peer File Transfer               │").cyan().bold());
     println!("{}", style("╰────────────────────────────────────────────────────────────────╯").cyan());
     println!();
     println!("  {:<12} {}", style("Code:").bold(), style(&code).magenta().bold());

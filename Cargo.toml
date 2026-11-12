@@ -1,5 +1,5 @@
 [package]
-name = "peerdrop"
+name = "voidhop"
 version = "0.1.0"
 edition = "2024"
 description = "Completely peer-to-peer serverless cross-platform file and directory transfer tool"

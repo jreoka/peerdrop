@@ -15,7 +15,7 @@ use std::process::ExitCode;
 
 fn looks_like_file_path(s: &str) -> bool {
     let trimmed = s.trim();
-    if trimmed.starts_with("pd1_") || trimmed.contains('@') {
+    if trimmed.starts_with("vh1_") || trimmed.contains('@') {
         return false;
     }
     if trimmed.starts_with('.')
@@ -68,21 +68,21 @@ async fn main() -> ExitCode {
             } else {
                 eprintln!(
                     "{}",
-                    style("PeerDrop: Encrypted File Transfer")
+                    style("VoidHop: Encrypted File Transfer")
                         .cyan()
                         .bold()
                 );
                 eprintln!();
                 eprintln!("Usage:");
-                eprintln!("  peerdrop send <file_or_dir>        Send a file or directory");
-                eprintln!("  peerdrop receive <code>            Receive using transfer code");
-                eprintln!("  peerdrop relay                     Run a transit relay server");
+                eprintln!("  voidhop send <file_or_dir>        Send a file or directory");
+                eprintln!("  voidhop receive <code>            Receive using transfer code");
+                eprintln!("  voidhop relay                     Run a transit relay server");
                 eprintln!();
                 eprintln!("Quick Shortcuts:");
-                eprintln!("  peerdrop <file_or_dir>             Automatically sends the file/dir");
-                eprintln!("  peerdrop <code>                    Automatically receives with code");
+                eprintln!("  voidhop <file_or_dir>             Automatically sends the file/dir");
+                eprintln!("  voidhop <code>                    Automatically receives with code");
                 eprintln!();
-                eprintln!("Try 'peerdrop --help' for details.");
+                eprintln!("Try 'voidhop --help' for details.");
                 return ExitCode::from(1);
             }
         }
